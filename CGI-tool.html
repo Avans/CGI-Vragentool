@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Criteriumgericht Interview Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .tab-active {
+            border-color: #4f46e5;
+            color: #4f46e5;
+            background-color: #eef2ff;
+        }
+        .answer-btn {
+            transition: all 0.2s ease-in-out;
+        }
+        .answer-btn.selected {
+            transform: scale(1.05);
+            box-shadow: 0 0 0 2px #4f46e5;
+        }
+        .copy-btn-feedback {
+            display: inline-block;
+            transition: opacity 0.3s, transform 0.3s;
+            opacity: 0;
+            transform: translateY(-5px);
+        }
+        .copy-btn-feedback.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* --- NIEUW: Print Layout Aanpassingen --- */
+        @media print {
+            /* Verberg de navigatie en knoppen */
+            #upload-container, #loading-spinner, #tabs-container, 
+            #reset-btn-top, #reset-btn-bottom-container, .copy-btn-feedback, 
+            .copy-btn, .nav-container {
+                display: none !important;
+            }
+
+            /* Verberg alle vragen/elementen die GEEN geselecteerd antwoord hebben */
+            .question-container:not(.has-selected-answer) {
+                display: none;
+            }
+
+            /* Verberg de niet-geselecteerde antwoordknoppen */
+            .question-container .answer-btn:not(.selected) {
+                display: none;
+            }
+
+            /* Minimaliseer marges en padding */
+            body, .container {
+                padding: 0 !important;
+                margin: 0 !important;
+                max-width: none !important;
+                width: 100%;
+            }
+
+            /* Maak de resultaten sectie compacter */
+            #main-content {
+                padding-top: 0;
+            }
+            .results-section, .category-section {
+                box-shadow: none !important;
+                border: none !important;
+                padding: 0 !important;
+                margin-bottom: 0.5rem !important;
+            }
+            .results-section h2, .category-section h2 {
+                font-size: 1.25rem; /* iets kleiner */
+                margin-bottom: 0.5rem !important;
+            }
+            
+            /* Dwing textarea om alle tekst te tonen en verwijder scrollbar */
+            textarea {
+                overflow: hidden !important;
+                height: auto !important;
+                resize: none !important;
+                padding: 0 !important;
+                border: none !important;
+                background-color: transparent !important;
+                min-height: 0 !important; /* Overrule default min-height */
+            }
+
+            /* Zorg ervoor dat de geselecteerde vraag en antwoord zichtbaar zijn */
+            .question-container {
+                padding: 0.5rem 0 !important;
+                border-bottom: 1px solid #ccc;
+                margin-bottom: 0 !important;
+                background-color: transparent !important;
+                box-shadow: none !important;
+            }
+
+            .question-container .answer-btn.selected {
+                transform: none;
+                box-shadow: none;
+                padding: 0.5rem;
+                display: block !important;
+                text-align: left;
+                border: 1px solid #4f46e5; /* Optionele rand om geselecteerd antwoord te markeren */
+                margin-top: 0.5rem;
+            }
+            
+            .question-text {
+                font-weight: bold;
+                margin-bottom: 0;
+                color: #000;
+            }
+
+            /* Verberg de toelichting-label, toon enkel de tekst */
+            .explanation-label {
+                display: none;
+            }
+            .explanation-container {
+                margin-top: 0.5rem;
+            }
+        }
+        /* --- EINDE NIEUW: Print Layout Aanpassingen --- */
+    </style>
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-slate-900">Criteriumgericht Interview Tool</h1>
+            <p class="text-slate-600 mt-2">Upload uw Excel-bestand om het interview te starten.</p>
+            <button id="reset-btn-top" class="hidden mt-4 px-4 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-2 align-text-bottom"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg>
+                Interview Resetten
+            </button>
+        </header>
+
+        <!-- File Upload Section -->
+        <div id="upload-container" class="max-w-xl mx-auto bg-white p-6 rounded-lg shadow-md border border-slate-200">
+            <label for="excel-file" class="block text-lg font-semibold text-slate-700 mb-2">Selecteer een interviewbestand (Excel)</label>
+            <input type="file" id="excel-file" accept=".xlsx, .xls, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" class="block w-full text-sm text-slate-500
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-full file:border-0
+                file:text-sm file:font-semibold
+                file:bg-indigo-50 file:text-indigo-700
+                hover:file:bg-indigo-100 cursor-pointer"/>
+            <p class="text-xs text-slate-500 mt-2">Selecteer een Excel-bestand. Elk werkblad in het bestand wordt een apart tabblad.</p>
+        </div>
+        
+        <div id="loading-spinner" class="text-center my-8 hidden">
+             <div role="status">
+                <svg aria-hidden="true" class="inline w-8 h-8 mr-2 text-gray-200 animate-spin dark:text-gray-600 fill-indigo-600" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/>
+                    <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill"/>
+                </svg>
+                <span class="sr-only">Laden...</span>
+            </div>
+            <p class="mt-2 text-slate-600">Bestand verwerken...</p>
+        </div>
+
+        <!-- Main Content: Tabs and Questions -->
+        <main id="main-content" class="hidden">
+            <div>
+                 <!-- Tabs -->
+                <div id="tabs-container" class="mb-6 border-b border-slate-200">
+                    <nav class="-mb-px flex space-x-6" aria-label="Tabs"></nav>
+                </div>
+                <!-- Questions Content -->
+                <div id="content-container"></div>
+            </div>
+        </main>
+
+        <footer id="reset-btn-bottom-container" class="text-center mt-8 hidden">
+            <button id="reset-btn-bottom" class="px-6 py-3 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block mr-2 align-text-bottom"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg>
+                Interview Resetten
+            </button>
+        </footer>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('excel-file');
+        const uploadContainer = document.getElementById('upload-container');
+        const mainContent = document.getElementById('main-content');
+        const tabsContainer = document.getElementById('tabs-container').querySelector('nav');
+        const contentContainer = document.getElementById('content-container');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const resetBtnTop = document.getElementById('reset-btn-top');
+        const resetBtnBottom = document.getElementById('reset-btn-bottom');
+        const resetBtnBottomContainer = document.getElementById('reset-btn-bottom-container');
+
+        const OORDEEL_LABELS = ['Uitmuntend', 'Goed', 'Voldoende', 'Onvoldoende', 'Slecht'];
+        const OORDEEL_COLORS = {
+            'Uitmuntend': 'bg-green-100 text-green-800 hover:bg-green-200',
+            'Goed': 'bg-blue-100 text-blue-800 hover:bg-blue-200',
+            'Voldoende': 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200',
+            'Onvoldoende': 'bg-orange-100 text-orange-800 hover:bg-orange-200',
+            'Slecht': 'bg-red-100 text-red-800 hover:bg-red-200',
+        };
+
+        // Scores gekoppeld aan de oordelen
+        const OORDEEL_SCORES = {
+            'Uitmuntend': 5,
+            'Goed': 4,
+            'Voldoende': 3,
+            'Onvoldoende': 2,
+            'Slecht': 1,
+        };
+
+        let interviewData = [];
+        let selectedAnswers = {};
+
+        fileInput.addEventListener('change', handleFileSelect);
+        
+        // --- NIEUWE FUNCTIE: Auto-resize Textarea ---
+        function autoResizeTextarea(textarea) {
+            textarea.style.height = 'auto'; // Reset hoogte
+            textarea.style.height = (textarea.scrollHeight) + 'px'; // Zet hoogte naar scrollhoogte
+        }
+
+        // --- NIEUWE FUNCTIE: Init Textarea Resize ---
+        function initTextareaResize(textarea) {
+            textarea.addEventListener('input', () => autoResizeTextarea(textarea));
+            // Doe de eerste resize na een korte delay om zeker te zijn dat de DOM gerenderd is
+            setTimeout(() => autoResizeTextarea(textarea), 0);
+        }
+        // --- EINDE NIEUWE FUNCTIES ---
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            uploadContainer.classList.add('hidden');
+            loadingSpinner.classList.remove('hidden');
+            mainContent.classList.add('hidden');
+            resetBtnTop.classList.add('hidden');
+            resetBtnBottomContainer.classList.add('hidden');
+
+            interviewData = [];
+            selectedAnswers = {};
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = e.target.result;
+                    const workbook = XLSX.read(data, { type: 'binary' });
+
+                    const allTabsData = workbook.SheetNames.map(sheetName => {
+                        const worksheet = workbook.Sheets[sheetName];
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet, {defval:""});
+                        const tabData = processExcelData(jsonData);
+                        return { name: sheetName, data: tabData };
+                    });
+
+                    interviewData = allTabsData;
+                    renderUI();
+                    loadingSpinner.classList.add('hidden');
+                    mainContent.classList.remove('hidden');
+                    resetBtnTop.classList.remove('hidden');
+                    resetBtnBottomContainer.classList.remove('hidden');
+
+                } catch (error) {
+                    console.error("Error processing Excel file:", error);
+                    loadingSpinner.classList.add('hidden');
+                    uploadContainer.classList.remove('hidden');
+                    alert("Er is een fout opgetreden bij het verwerken van het Excel-bestand. Controleer het formaat en probeer het opnieuw.");
+                }
+            };
+            reader.onerror = (error) => {
+                console.error("File could not be read: ", error);
+                loadingSpinner.classList.add('hidden');
+                uploadContainer.classList.remove('hidden');
+                alert("Het bestand kon niet worden gelezen.");
+            };
+            reader.readAsBinaryString(file);
+        }
+        
+        function processExcelData(rows) {
+            const categories = new Map();
+            let currentCategory = '';
+            let currentSubCategory = '';
+
+            rows.forEach((row, index) => {
+                const cleanedRow = {};
+                for (const key in row) {
+                    cleanedRow[key.trim()] = row[key];
+                }
+                
+                const categoryName = cleanedRow['Categorie']?.toString().trim() || currentCategory;
+                const subCategoryName = cleanedRow['Subcategorie']?.toString().trim() || currentSubCategory;
+
+                if (!categoryName || !subCategoryName || !cleanedRow['Vraag']?.toString().trim()) return;
+
+                currentCategory = categoryName;
+                currentSubCategory = subCategoryName;
+
+                if (!categories.has(categoryName)) {
+                    categories.set(categoryName, { name: categoryName, subcategories: new Map() });
+                }
+
+                const category = categories.get(categoryName);
+
+                if (!category.subcategories.has(subCategoryName)) {
+                    category.subcategories.set(subCategoryName, { name: subCategoryName, questions: [] });
+                }
+
+                const subcategory = category.subcategories.get(subCategoryName);
+                
+                const question = {
+                    id: `q-${index}`,
+                    text: cleanedRow['Vraag'].toString().trim(),
+                    answers: OORDEEL_LABELS.reduce((acc, label) => {
+                        if (cleanedRow[label] && cleanedRow[label].toString().trim()) {
+                            acc[label] = cleanedRow[label].toString().trim();
+                        }
+                        return acc;
+                    }, {})
+                };
+                subcategory.questions.push(question);
+            });
+
+            return Array.from(categories.values()).map(cat => ({
+                ...cat,
+                subcategories: Array.from(cat.subcategories.values()).map(sub => ({
+                    ...sub,
+                    currentIndex: sub.questions.length > 0 ? Math.floor(Math.random() * sub.questions.length) : 0
+                }))
+            }));
+        }
+
+        function renderUI() {
+            renderTabs();
+            if (interviewData.length > 0) {
+                switchTab(0);
+            }
+        }
+
+        function renderTabs() {
+            tabsContainer.innerHTML = '';
+            interviewData.forEach((tab, index) => {
+                const tabButton = document.createElement('button');
+                tabButton.className = 'whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200';
+                tabButton.textContent = tab.name;
+                tabButton.onclick = () => switchTab(index);
+                tabButton.dataset.tabIndex = index;
+                tabsContainer.appendChild(tabButton);
+            });
+        }
+        
+        function switchTab(tabIndex) {
+            const tabButtons = tabsContainer.querySelectorAll('button');
+            tabButtons.forEach((btn, index) => {
+                if (index === tabIndex) {
+                    btn.classList.add('tab-active');
+                    btn.classList.remove('text-slate-500', 'hover:text-slate-700', 'border-transparent', 'hover:border-slate-300');
+                } else {
+                    btn.classList.remove('tab-active');
+                    btn.classList.add('text-slate-500', 'hover:text-slate-700', 'border-transparent', 'hover:border-slate-300');
+                }
+            });
+
+            const tab = interviewData[tabIndex];
+            contentContainer.innerHTML = '';
+
+            const questionsSection = document.createElement('div');
+            tab.data.forEach(category => {
+                const categoryElement = createCategoryElement(category);
+                questionsSection.appendChild(categoryElement);
+            });
+            contentContainer.appendChild(questionsSection);
+
+            const resultsSection = document.createElement('div');
+            resultsSection.className = 'mt-12 bg-white p-6 rounded-lg shadow-md border border-slate-200 results-section';
+            resultsSection.id = 'results-section';
+
+            const resultsHeader = document.createElement('h2');
+            resultsHeader.className = 'text-2xl font-bold mb-4 text-slate-900';
+            resultsHeader.textContent = `Resultaten voor ${tab.name}`;
+            resultsSection.appendChild(resultsHeader);
+            
+            const textareasContainerForTab = document.createElement('div');
+            textareasContainerForTab.className = 'space-y-6';
+
+            const categoriesInTab = tab.data.map(cat => cat.name);
+
+            if (categoriesInTab.length === 0) {
+                 textareasContainerForTab.innerHTML = '<p class="text-slate-500">Geen categorieën gevonden in dit werkblad.</p>';
+            } else {
+                categoriesInTab.forEach(categoryName => {
+                    const container = document.createElement('div');
+                    
+                    const header = document.createElement('div');
+                    header.className = 'flex justify-between items-center mb-2';
+
+                    const title = document.createElement('h3');
+                    title.className = 'text-lg font-semibold text-slate-700';
+                    title.textContent = categoryName;
+
+                    const copyButton = document.createElement('button');
+                    // Toegevoegde klasse 'copy-btn' voor de print CSS
+                    copyButton.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-500"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    `;
+                    copyButton.className = 'p-1 rounded-md hover:bg-slate-100 transition-colors copy-btn';
+                    copyButton.onclick = () => copyToClipboard(categoryName);
+                    
+                    const feedbackSpan = document.createElement('span');
+                    feedbackSpan.id = `copy-feedback-${toSlug(categoryName)}`;
+                    feedbackSpan.className = 'copy-btn-feedback ml-2 text-sm text-indigo-600 font-semibold';
+                    feedbackSpan.textContent = 'Gekopieerd!';
+
+                    header.appendChild(title);
+                    const buttonContainer = document.createElement('div');
+                    buttonContainer.className = 'flex items-center';
+                    buttonContainer.appendChild(copyButton);
+                    buttonContainer.appendChild(feedbackSpan);
+                    header.appendChild(buttonContainer);
+
+                    // Container voor het gemiddelde advies
+                    const adviceContainer = document.createElement('div');
+                    adviceContainer.className = 'mb-3 flex items-center space-x-2';
+                    adviceContainer.innerHTML = `
+                        <span class="text-sm font-semibold text-slate-700">Gemiddeld Advies:</span>
+                        <span id="advies-${toSlug(categoryName)}" class="px-3 py-1 text-sm font-semibold rounded-full bg-slate-100 text-slate-500">
+                            N.v.t.
+                        </span>
+                    `;
+
+                    const textarea = document.createElement('textarea');
+                    textarea.id = `textarea-${toSlug(categoryName)}`;
+                    textarea.readOnly = true;
+                    // De default h-48 verwijderd om automatische resizing toe te staan
+                    textarea.className = 'w-full p-3 bg-slate-100 rounded-md border border-slate-200 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500';
+                    textarea.placeholder = `Resultaten voor ${categoryName} verschijnen hier...`;
+
+                    container.appendChild(header);
+                    container.appendChild(adviceContainer);
+                    container.appendChild(textarea);
+                    textareasContainerForTab.appendChild(container);
+                    
+                    // Init de auto-resize op de resultaat-textarea
+                    initTextareaResize(textarea); 
+                });
+            }
+
+            resultsSection.appendChild(textareasContainerForTab);
+            contentContainer.appendChild(resultsSection);
+
+            updateTextareas();
+        }
+        
+        function createCategoryElement(category) {
+            const container = document.createElement('div');
+            // Toegevoegde klasse 'category-section' voor de print CSS
+            container.className = 'mb-8 category-section';
+
+            const title = document.createElement('h2');
+            title.className = 'text-2xl font-bold text-slate-800 mb-4 pb-2 border-b border-slate-200';
+            title.textContent = category.name;
+            container.appendChild(title);
+
+            category.subcategories.forEach(subcategory => {
+                const subCatElement = document.createElement('details');
+                subCatElement.className = 'mb-4 bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden';
+                subCatElement.open = true;
+
+                const summary = document.createElement('summary');
+                summary.className = 'p-4 font-semibold text-lg cursor-pointer hover:bg-slate-50 flex justify-between items-center';
+                summary.textContent = subcategory.name;
+                subCatElement.appendChild(summary);
+
+                const contentContainer = document.createElement('div');
+                contentContainer.className = 'p-4 border-t border-slate-200';
+
+                const questionDisplay = document.createElement('div');
+                questionDisplay.id = `q-display-${toSlug(category.name)}-${toSlug(subcategory.name)}`;
+                
+                const initialQuestion = subcategory.questions[subcategory.currentIndex];
+                if (initialQuestion) {
+                    const questionElement = createQuestionElement(initialQuestion, category.name, subcategory.name);
+                    questionDisplay.appendChild(questionElement);
+                } else {
+                    questionDisplay.innerHTML = '<p class="text-slate-500">Geen vragen gevonden in deze subcategorie.</p>';
+                }
+
+                const navContainer = document.createElement('div');
+                // Toegevoegde klasse 'nav-container' voor de print CSS
+                navContainer.className = 'flex justify-between items-center mt-4 nav-container';
+                if (subcategory.questions.length <= 1) {
+                    navContainer.classList.add('hidden');
+                }
+
+                const prevButton = document.createElement('button');
+                prevButton.innerHTML = '&larr; Vorige vraag';
+                prevButton.className = 'px-3 py-1 bg-slate-200 text-slate-700 rounded-md hover:bg-slate-300 text-sm disabled:opacity-50 disabled:cursor-not-allowed';
+                prevButton.onclick = () => navigateQuestion(category.name, subcategory.name, -1);
+                
+                const questionCounter = document.createElement('span');
+                questionCounter.id = `q-counter-${toSlug(category.name)}-${toSlug(subcategory.name)}`;
+                questionCounter.className = 'text-sm text-slate-500 font-medium';
+                questionCounter.textContent = `${subcategory.currentIndex + 1} / ${subcategory.questions.length}`;
+
+                const nextButton = document.createElement('button');
+                nextButton.innerHTML = 'Volgende vraag &rarr;';
+                nextButton.className = 'px-3 py-1 bg-slate-200 text-slate-700 rounded-md hover:bg-slate-300 text-sm disabled:opacity-50 disabled:cursor-not-allowed';
+                nextButton.onclick = () => navigateQuestion(category.name, subcategory.name, 1);
+
+                navContainer.appendChild(prevButton);
+                navContainer.appendChild(questionCounter);
+                navContainer.appendChild(nextButton);
+
+                contentContainer.appendChild(questionDisplay);
+                contentContainer.appendChild(navContainer);
+                subCatElement.appendChild(contentContainer);
+                container.appendChild(subCatElement);
+            });
+
+            return container;
+        }
+
+        function navigateQuestion(categoryName, subcategoryName, direction) {
+            const currentTabIndex = parseInt(tabsContainer.querySelector('.tab-active').dataset.tabIndex);
+            const tab = interviewData[currentTabIndex];
+            const category = tab.data.find(c => c.name === categoryName);
+            const subcategory = category.subcategories.find(s => s.name === subcategoryName);
+
+            const numQuestions = subcategory.questions.length;
+            if (numQuestions <= 1) return;
+
+            subcategory.currentIndex = (subcategory.currentIndex + direction + numQuestions) % numQuestions;
+
+            const questionDisplay = document.getElementById(`q-display-${toSlug(categoryName)}-${toSlug(subcategoryName)}`);
+            questionDisplay.innerHTML = '';
+            const question = subcategory.questions[subcategory.currentIndex];
+            const questionElement = createQuestionElement(question, categoryName, subcategoryName);
+            questionDisplay.appendChild(questionElement);
+
+            const counter = document.getElementById(`q-counter-${toSlug(categoryName)}-${toSlug(subcategoryName)}`);
+            counter.textContent = `${subcategory.currentIndex + 1} / ${numQuestions}`;
+        }
+        
+        function createQuestionElement(question, categoryName, subcategoryName) {
+            const el = document.createElement('div');
+            // Toegevoegde klasse 'question-container' voor de print CSS.
+            // De 'has-selected-answer' klasse wordt later toegevoegd/verwijderd in handleAnswerClick.
+            el.className = 'p-4 rounded-md bg-slate-50 border border-slate-200 question-container';
+            el.id = question.id;
+            
+            // Check of er al een antwoord geselecteerd is om de print-klasse meteen toe te voegen
+            if (selectedAnswers[question.id]) {
+                el.classList.add('has-selected-answer');
+            }
+
+            const questionText = document.createElement('p');
+            // Toegevoegde klasse 'question-text' voor de print CSS
+            questionText.className = 'font-medium text-slate-700 mb-3 question-text';
+            questionText.textContent = question.text;
+            el.appendChild(questionText);
+
+            const answersContainer = document.createElement('div');
+            answersContainer.className = 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-2';
+            
+            OORDEEL_LABELS.forEach(oordeel => {
+                if (question.answers[oordeel]) {
+                    const button = document.createElement('button');
+                    button.dataset.oordeel = oordeel;
+                    
+                    button.innerHTML = `
+                        <span class="font-semibold block text-sm">${oordeel}</span>
+                        <span class="text-xs mt-1 block font-normal text-slate-600">${question.answers[oordeel]}</span>
+                    `;
+
+                    button.className = `answer-btn p-2 text-left rounded-lg h-full ${OORDEEL_COLORS[oordeel]}`;
+                    
+                    if (selectedAnswers[question.id]?.oordeel === oordeel) {
+                        button.classList.add('selected');
+                    }
+
+                    button.onclick = () => handleAnswerClick(question.id, oordeel, categoryName, subcategoryName);
+                    answersContainer.appendChild(button);
+                }
+            });
+            el.appendChild(answersContainer);
+
+            const explanationContainer = document.createElement('div');
+            // Toegevoegde klasse 'explanation-container' voor de print CSS
+            explanationContainer.className = 'mt-4 explanation-container';
+
+            const explanationLabel = document.createElement('label');
+            explanationLabel.htmlFor = `explanation-${question.id}`;
+            // Toegevoegde klasse 'explanation-label' voor de print CSS
+            explanationLabel.className = 'block text-sm font-medium text-slate-600 mb-1 explanation-label';
+            explanationLabel.textContent = 'Toelichting:';
+            explanationContainer.appendChild(explanationLabel);
+
+            const explanationTextarea = document.createElement('textarea');
+            explanationTextarea.id = `explanation-${question.id}`;
+            // De 'rows = 2' is verwijderd om automatische resize de hoogte te laten bepalen.
+            // `min-h-[3rem]` is toegevoegd als een kleine minimale hoogte
+            explanationTextarea.className = 'w-full p-2 border border-slate-300 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500 transition min-h-[3rem]'; 
+            explanationTextarea.placeholder = 'Voeg hier een optionele toelichting toe...';
+            
+            if (selectedAnswers[question.id] && selectedAnswers[question.id].explanation) {
+                explanationTextarea.value = selectedAnswers[question.id].explanation;
+            }
+
+            explanationTextarea.oninput = () => {
+                if (selectedAnswers[question.id]) {
+                    selectedAnswers[question.id].explanation = explanationTextarea.value.trim();
+                    updateTextareas();
+                }
+                autoResizeTextarea(explanationTextarea); // Auto-resize bij input
+            };
+
+            explanationContainer.appendChild(explanationTextarea);
+            el.appendChild(explanationContainer);
+            
+            // Init de auto-resize op de toelichting-textarea
+            initTextareaResize(explanationTextarea);
+            
+            return el;
+        }
+
+        function handleAnswerClick(questionId, oordeel, categoryName, subcategoryName) {
+            const questionElement = document.getElementById(questionId);
+            const clickedButton = questionElement.querySelector(`button[data-oordeel="${oordeel}"]`);
+            const explanationTextarea = document.getElementById(`explanation-${questionId}`);
+            const explanation = explanationTextarea.value.trim();
+            
+            if (clickedButton.classList.contains('selected')) {
+                clickedButton.classList.remove('selected');
+                delete selectedAnswers[questionId];
+                questionElement.classList.remove('has-selected-answer'); // Print CSS update
+            } else {
+                questionElement.querySelectorAll('.answer-btn').forEach(btn => btn.classList.remove('selected'));
+                clickedButton.classList.add('selected');
+                // De score wordt nu ook opgeslagen
+                selectedAnswers[questionId] = { oordeel, categoryName, subcategoryName, explanation, score: OORDEEL_SCORES[oordeel] };
+                questionElement.classList.add('has-selected-answer'); // Print CSS update
+            }
+            updateTextareas();
+        }
+
+        function updateTextareas() {
+            const resultsByCategory = {};
+            const scoresByCategory = {}; // Nieuw object om scores bij te houden
+
+            for (const [questionId, data] of Object.entries(selectedAnswers)) {
+                if (!resultsByCategory[data.categoryName]) {
+                    resultsByCategory[data.categoryName] = {};
+                    scoresByCategory[data.categoryName] = []; // Initialiseer score array
+                }
+                if (!resultsByCategory[data.categoryName][data.subcategoryName]) {
+                    resultsByCategory[data.categoryName][data.subcategoryName] = [];
+                }
+                let resultLine = `${questionId}: ${data.oordeel}`;
+                if (data.explanation && data.explanation.length > 0) {
+                    resultLine += ` - ${data.explanation}`;
+                }
+                resultsByCategory[data.categoryName][data.subcategoryName].push(resultLine);
+                scoresByCategory[data.categoryName].push(data.score); // Voeg score toe
+            }
+
+            // Reset alle textareas
+            document.querySelectorAll('textarea[id^="textarea-"]').forEach(ta => ta.value = '');
+            
+            // Reset alle advies-indicatoren
+            document.querySelectorAll('span[id^="advies-"]').forEach(span => {
+                span.textContent = 'N.v.t.';
+                span.className = 'px-3 py-1 text-sm font-semibold rounded-full bg-slate-100 text-slate-500';
+            });
+
+            for (const [categoryName, subcategories] of Object.entries(resultsByCategory)) {
+                const textarea = document.getElementById(`textarea-${toSlug(categoryName)}`);
+                if (textarea) {
+                    let fullText = '';
+                    // ... Sorteer en voeg antwoorden toe aan fullText ...
+                    for (const [subcategoryName, answers] of Object.entries(subcategories)) {
+                        fullText += `${subcategoryName}\n`;
+                        answers.sort().forEach(answer => { // Sort answers by questionId
+                            fullText += `\t${answer}\n`;
+                        });
+                    }
+                    textarea.value = fullText;
+                    autoResizeTextarea(textarea); // Auto-resize na content update
+                }
+
+                // NIEUW: Bereken en update het advies
+                const adviceSpan = document.getElementById(`advies-${toSlug(categoryName)}`);
+                const scores = scoresByCategory[categoryName] || [];
+                
+                if (adviceSpan && scores.length > 0) {
+                    const totalScore = scores.reduce((acc, s) => acc + s, 0);
+                    const averageScore = totalScore / scores.length;
+                    
+                    const { label, colorClass } = getAdviceFromScore(averageScore);
+                    
+                    adviceSpan.textContent = label;
+                    adviceSpan.className = 'px-3 py-1 text-sm font-semibold rounded-full'; 
+                    adviceSpan.classList.add(...colorClass.split(' '));
+                }
+            }
+            
+            // GECORRIGEERDE CODE: Veilige auto-resize voor toelichting textareas
+            document.querySelectorAll('textarea[id^="explanation-"]').forEach(ta => {
+                const questionId = ta.id.replace('explanation-', 'q-');
+                // Controleer of er een geselecteerd antwoord bestaat EN of de toelichting niet leeg is
+                const selectedAnswer = selectedAnswers[questionId];
+                
+                if (selectedAnswer && selectedAnswer.explanation && selectedAnswer.explanation.length > 0) {
+                    autoResizeTextarea(ta); 
+                }
+                // Als er geen geselecteerd antwoord is (na een reset), hoeft er geen autoResize te gebeuren.
+            });
+        }
+
+        // NIEUWE helper functie
+        function getAdviceFromScore(score) {
+            if (score >= 4.5) return { label: 'Uitmuntend', colorClass: OORDEEL_COLORS['Uitmuntend'] };
+            if (score >= 3.5) return { label: 'Goed', colorClass: OORDEEL_COLORS['Goed'] };
+            if (score >= 2.5) return { label: 'Voldoende', colorClass: OORDEEL_COLORS['Voldoende'] };
+            if (score >= 1.5) return { label: 'Onvoldoende', colorClass: OORDEEL_COLORS['Onvoldoende'] };
+            return { label: 'Slecht', colorClass: OORDEEL_COLORS['Slecht'] };
+        }
+
+        function copyToClipboard(categoryName) {
+            const textarea = document.getElementById(`textarea-${toSlug(categoryName)}`);
+            if (textarea && textarea.value) {
+                navigator.clipboard.writeText(textarea.value).then(() => {
+                    const feedback = document.getElementById(`copy-feedback-${toSlug(categoryName)}`);
+                    feedback.classList.add('show');
+                    setTimeout(() => feedback.classList.remove('show'), 2000);
+                }).catch(err => {
+                    console.error('Failed to copy: ', err);
+                });
+            }
+        }
+        
+        function toSlug(str) {
+            return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+        }
+
+        function resetInterviewState() {
+            selectedAnswers = {};
+
+            document.querySelectorAll('.answer-btn.selected').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+            
+            document.querySelectorAll('.question-container').forEach(el => {
+                el.classList.remove('has-selected-answer'); // Print CSS update
+            });
+
+            document.querySelectorAll('textarea[id^="explanation-"]').forEach(ta => {
+                ta.value = '';
+                // Zorg ervoor dat de textarea weer compact wordt na het resetten
+                ta.style.height = 'auto'; 
+            });
+
+            updateTextareas();
+
+            const activeTabButton = tabsContainer.querySelector('.tab-active');
+            const activeTabIndex = activeTabButton ? parseInt(activeTabButton.dataset.tabIndex) : 0;
+
+            interviewData.forEach(tab => {
+                tab.data.forEach(category => {
+                    category.subcategories.forEach(subcategory => {
+                        if (subcategory.questions.length > 0) {
+                            subcategory.currentIndex = Math.floor(Math.random() * subcategory.questions.length);
+                        }
+                    });
+                });
+            });
+
+            if (interviewData.length > 0) {
+                switchTab(activeTabIndex);
+            }
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        resetBtnTop.addEventListener('click', resetInterviewState);
+        resetBtnBottom.addEventListener('click', resetInterviewState);
+
+    </script>
+</body>
+</html>
