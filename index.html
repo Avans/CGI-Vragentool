@@ -170,7 +170,7 @@
                     <nav class="-mb-px flex space-x-6" aria-label="Tabs"></nav>
                 </div>
                 <!-- Questions Content -->
-                <div id="content-container"></div>
+                <div id="tabs-content-root"></div>
             </div>
         </main>
 
@@ -187,7 +187,7 @@
         const uploadContainer = document.getElementById('upload-container');
         const mainContent = document.getElementById('main-content');
         const tabsContainer = document.getElementById('tabs-container').querySelector('nav');
-        const contentContainer = document.getElementById('content-container');
+        const contentRoot = document.getElementById('tabs-content-root');
         const loadingSpinner = document.getElementById('loading-spinner');
         const resetBtnTop = document.getElementById('reset-btn-top');
         const resetBtnBottom = document.getElementById('reset-btn-bottom');
@@ -249,10 +249,10 @@
                     const data = e.target.result;
                     const workbook = XLSX.read(data, { type: 'binary' });
 
-                    const allTabsData = workbook.SheetNames.map(sheetName => {
+                    const allTabsData = workbook.SheetNames.map((sheetName, index) => {
                         const worksheet = workbook.Sheets[sheetName];
                         const jsonData = XLSX.utils.sheet_to_json(worksheet, {defval:""});
-                        const tabData = processExcelData(jsonData);
+                        const tabData = processExcelData(jsonData, index);
                         return { name: sheetName, data: tabData };
                     });
 
@@ -279,7 +279,7 @@
             reader.readAsBinaryString(file);
         }
         
-        function processExcelData(rows) {
+        function processExcelData(rows, tabIndex) {
             const categories = new Map();
             let currentCategory = '';
             let currentSubCategory = '';
@@ -311,7 +311,7 @@
                 const subcategory = category.subcategories.get(subCategoryName);
                 
                 const question = {
-                    id: `q-${index}`,
+                    id: `q-${tabIndex}-${index}`,
                     text: cleanedRow['Vraag'].toString().trim(),
                     answers: OORDEEL_LABELS.reduce((acc, label) => {
                         if (cleanedRow[label] && cleanedRow[label].toString().trim()) {
@@ -334,9 +334,101 @@
 
         function renderUI() {
             renderTabs();
+            renderAllTabContents();
             if (interviewData.length > 0) {
                 switchTab(0);
             }
+        }
+
+        function renderAllTabContents() {
+            contentRoot.innerHTML = '';
+            interviewData.forEach((tab, tabIndex) => {
+                const tabContent = document.createElement('div');
+                tabContent.id = `tab-content-${tabIndex}`;
+                tabContent.className = 'tab-pane hidden';
+
+                const questionsSection = document.createElement('div');
+                tab.data.forEach(category => {
+                    const categoryElement = createCategoryElement(category, tabIndex);
+                    questionsSection.appendChild(categoryElement);
+                });
+                tabContent.appendChild(questionsSection);
+
+                const resultsSection = document.createElement('div');
+                resultsSection.className = 'mt-12 bg-white p-6 rounded-lg shadow-md border border-slate-200 results-section';
+                resultsSection.id = `results-section-${tabIndex}`;
+
+                const resultsHeader = document.createElement('h2');
+                resultsHeader.className = 'text-2xl font-bold mb-4 text-slate-900';
+                resultsHeader.textContent = `Resultaten voor ${tab.name}`;
+                resultsSection.appendChild(resultsHeader);
+                
+                const textareasContainerForTab = document.createElement('div');
+                textareasContainerForTab.className = 'space-y-6';
+
+                const categoriesInTab = tab.data.map(cat => cat.name);
+
+                if (categoriesInTab.length === 0) {
+                     textareasContainerForTab.innerHTML = '<p class="text-slate-500">Geen categorieën gevonden in dit werkblad.</p>';
+                } else {
+                    categoriesInTab.forEach(categoryName => {
+                        const container = document.createElement('div');
+                        
+                        const header = document.createElement('div');
+                        header.className = 'flex justify-between items-center mb-2';
+
+                        const title = document.createElement('h3');
+                        title.className = 'text-lg font-semibold text-slate-700';
+                        title.innerHTML = formatText(categoryName);
+
+                        const copyButton = document.createElement('button');
+                        copyButton.innerHTML = `
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-500"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        `;
+                        copyButton.className = 'p-1 rounded-md hover:bg-slate-100 transition-colors copy-btn';
+                        copyButton.onclick = () => copyToClipboard(categoryName, tabIndex);
+                        
+                        const feedbackSpan = document.createElement('span');
+                        feedbackSpan.id = `copy-feedback-${tabIndex}-${toSlug(categoryName)}`;
+                        feedbackSpan.className = 'copy-btn-feedback ml-2 text-sm text-indigo-600 font-semibold';
+                        feedbackSpan.textContent = 'Gekopieerd!';
+
+                        header.appendChild(title);
+                        const buttonContainer = document.createElement('div');
+                        buttonContainer.className = 'flex items-center';
+                        buttonContainer.appendChild(copyButton);
+                        buttonContainer.appendChild(feedbackSpan);
+                        header.appendChild(buttonContainer);
+
+                        const adviceContainer = document.createElement('div');
+                        adviceContainer.className = 'mb-3 flex items-center space-x-2';
+                        adviceContainer.innerHTML = `
+                            <span class="text-sm font-semibold text-slate-700">Gemiddeld Advies:</span>
+                            <span id="advies-${tabIndex}-${toSlug(categoryName)}" class="px-3 py-1 text-sm font-semibold rounded-full bg-slate-100 text-slate-500">
+                                N.v.t.
+                            </span>
+                        `;
+
+                        const textarea = document.createElement('textarea');
+                        textarea.id = `textarea-${tabIndex}-${toSlug(categoryName)}`;
+                        textarea.readOnly = true;
+                        textarea.className = 'w-full p-3 bg-slate-100 rounded-md border border-slate-200 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500';
+                        textarea.placeholder = `Resultaten voor ${categoryName} verschijnen hier...`;
+
+                        container.appendChild(header);
+                        container.appendChild(adviceContainer);
+                        container.appendChild(textarea);
+                        textareasContainerForTab.appendChild(container);
+                        
+                        initTextareaResize(textarea); 
+                    });
+                }
+
+                resultsSection.appendChild(textareasContainerForTab);
+                tabContent.appendChild(resultsSection);
+                contentRoot.appendChild(tabContent);
+            });
+            updateTextareas();
         }
 
         function renderTabs() {
@@ -363,97 +455,25 @@
                 }
             });
 
-            const tab = interviewData[tabIndex];
-            contentContainer.innerHTML = '';
-
-            const questionsSection = document.createElement('div');
-            tab.data.forEach(category => {
-                const categoryElement = createCategoryElement(category);
-                questionsSection.appendChild(categoryElement);
+            const tabPanes = contentRoot.querySelectorAll('.tab-pane');
+            tabPanes.forEach((pane, index) => {
+                if (index === tabIndex) {
+                    pane.classList.remove('hidden');
+                } else {
+                    pane.classList.add('hidden');
+                }
             });
-            contentContainer.appendChild(questionsSection);
 
-            const resultsSection = document.createElement('div');
-            resultsSection.className = 'mt-12 bg-white p-6 rounded-lg shadow-md border border-slate-200 results-section';
-            resultsSection.id = 'results-section';
-
-            const resultsHeader = document.createElement('h2');
-            resultsHeader.className = 'text-2xl font-bold mb-4 text-slate-900';
-            resultsHeader.textContent = `Resultaten voor ${tab.name}`;
-            resultsSection.appendChild(resultsHeader);
-            
-            const textareasContainerForTab = document.createElement('div');
-            textareasContainerForTab.className = 'space-y-6';
-
-            const categoriesInTab = tab.data.map(cat => cat.name);
-
-            if (categoriesInTab.length === 0) {
-                 textareasContainerForTab.innerHTML = '<p class="text-slate-500">Geen categorieën gevonden in dit werkblad.</p>';
-            } else {
-                categoriesInTab.forEach(categoryName => {
-                    const container = document.createElement('div');
-                    
-                    const header = document.createElement('div');
-                    header.className = 'flex justify-between items-center mb-2';
-
-                    const title = document.createElement('h3');
-                    title.className = 'text-lg font-semibold text-slate-700';
-                    title.innerHTML = formatText(categoryName);
-
-                    const copyButton = document.createElement('button');
-                    // Toegevoegde klasse 'copy-btn' voor de print CSS
-                    copyButton.innerHTML = `
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-500"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                    `;
-                    copyButton.className = 'p-1 rounded-md hover:bg-slate-100 transition-colors copy-btn';
-                    copyButton.onclick = () => copyToClipboard(categoryName);
-                    
-                    const feedbackSpan = document.createElement('span');
-                    feedbackSpan.id = `copy-feedback-${toSlug(categoryName)}`;
-                    feedbackSpan.className = 'copy-btn-feedback ml-2 text-sm text-indigo-600 font-semibold';
-                    feedbackSpan.textContent = 'Gekopieerd!';
-
-                    header.appendChild(title);
-                    const buttonContainer = document.createElement('div');
-                    buttonContainer.className = 'flex items-center';
-                    buttonContainer.appendChild(copyButton);
-                    buttonContainer.appendChild(feedbackSpan);
-                    header.appendChild(buttonContainer);
-
-                    // Container voor het gemiddelde advies
-                    const adviceContainer = document.createElement('div');
-                    adviceContainer.className = 'mb-3 flex items-center space-x-2';
-                    adviceContainer.innerHTML = `
-                        <span class="text-sm font-semibold text-slate-700">Gemiddeld Advies:</span>
-                        <span id="advies-${toSlug(categoryName)}" class="px-3 py-1 text-sm font-semibold rounded-full bg-slate-100 text-slate-500">
-                            N.v.t.
-                        </span>
-                    `;
-
-                    const textarea = document.createElement('textarea');
-                    textarea.id = `textarea-${toSlug(categoryName)}`;
-                    textarea.readOnly = true;
-                    // De default h-48 verwijderd om automatische resizing toe te staan
-                    textarea.className = 'w-full p-3 bg-slate-100 rounded-md border border-slate-200 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500';
-                    textarea.placeholder = `Resultaten voor ${categoryName} verschijnen hier...`;
-
-                    container.appendChild(header);
-                    container.appendChild(adviceContainer);
-                    container.appendChild(textarea);
-                    textareasContainerForTab.appendChild(container);
-                    
-                    // Init de auto-resize op de resultaat-textarea
-                    initTextareaResize(textarea); 
-                });
-            }
-
-            resultsSection.appendChild(textareasContainerForTab);
-            contentContainer.appendChild(resultsSection);
-
-            updateTextareas();
+            // Trigger auto-resize voor alle zichtbare textareas in de nieuwe tab
+            setTimeout(() => {
+                const activePane = document.getElementById(`tab-content-${tabIndex}`);
+                if (activePane) {
+                    activePane.querySelectorAll('textarea').forEach(autoResizeTextarea);
+                }
+            }, 0);
         }
         
-        function createCategoryElement(category) {
+        function createCategoryElement(category, tabIndex) {
             const container = document.createElement('div');
             // Toegevoegde klasse 'category-section' voor de print CSS
             container.className = 'mb-8 category-section';
@@ -481,7 +501,7 @@
                 
                 const initialQuestion = subcategory.questions[subcategory.currentIndex];
                 if (initialQuestion) {
-                    const questionElement = createQuestionElement(initialQuestion, category.name, subcategory.name);
+                    const questionElement = createQuestionElement(initialQuestion, category.name, subcategory.name, tabIndex);
                     questionDisplay.appendChild(questionElement);
                 } else {
                     questionDisplay.innerHTML = '<p class="text-slate-500">Geen vragen gevonden in deze subcategorie.</p>';
@@ -497,7 +517,7 @@
                 const prevButton = document.createElement('button');
                 prevButton.innerHTML = '&larr; Vorige vraag';
                 prevButton.className = 'px-3 py-1 bg-slate-200 text-slate-700 rounded-md hover:bg-slate-300 text-sm disabled:opacity-50 disabled:cursor-not-allowed';
-                prevButton.onclick = () => navigateQuestion(category.name, subcategory.name, -1);
+                prevButton.onclick = () => navigateQuestion(category.name, subcategory.name, -1, tabIndex);
                 
                 const questionCounter = document.createElement('span');
                 questionCounter.id = `q-counter-${toSlug(category.name)}-${toSlug(subcategory.name)}`;
@@ -507,7 +527,7 @@
                 const nextButton = document.createElement('button');
                 nextButton.innerHTML = 'Volgende vraag &rarr;';
                 nextButton.className = 'px-3 py-1 bg-slate-200 text-slate-700 rounded-md hover:bg-slate-300 text-sm disabled:opacity-50 disabled:cursor-not-allowed';
-                nextButton.onclick = () => navigateQuestion(category.name, subcategory.name, 1);
+                nextButton.onclick = () => navigateQuestion(category.name, subcategory.name, 1, tabIndex);
 
                 navContainer.appendChild(prevButton);
                 navContainer.appendChild(questionCounter);
@@ -522,9 +542,8 @@
             return container;
         }
 
-        function navigateQuestion(categoryName, subcategoryName, direction) {
-            const currentTabIndex = parseInt(tabsContainer.querySelector('.tab-active').dataset.tabIndex);
-            const tab = interviewData[currentTabIndex];
+        function navigateQuestion(categoryName, subcategoryName, direction, tabIndex) {
+            const tab = interviewData[tabIndex];
             const category = tab.data.find(c => c.name === categoryName);
             const subcategory = category.subcategories.find(s => s.name === subcategoryName);
 
@@ -536,14 +555,14 @@
             const questionDisplay = document.getElementById(`q-display-${toSlug(categoryName)}-${toSlug(subcategoryName)}`);
             questionDisplay.innerHTML = '';
             const question = subcategory.questions[subcategory.currentIndex];
-            const questionElement = createQuestionElement(question, categoryName, subcategoryName);
+            const questionElement = createQuestionElement(question, categoryName, subcategoryName, tabIndex);
             questionDisplay.appendChild(questionElement);
 
             const counter = document.getElementById(`q-counter-${toSlug(categoryName)}-${toSlug(subcategoryName)}`);
             counter.textContent = `${subcategory.currentIndex + 1} / ${numQuestions}`;
         }
         
-        function createQuestionElement(question, categoryName, subcategoryName) {
+        function createQuestionElement(question, categoryName, subcategoryName, tabIndex) {
             const el = document.createElement('div');
             // Toegevoegde klasse 'question-container' voor de print CSS.
             // De 'has-selected-answer' klasse wordt later toegevoegd/verwijderd in handleAnswerClick.
@@ -580,7 +599,7 @@
                         button.classList.add('selected');
                     }
 
-                    button.onclick = () => handleAnswerClick(question.id, oordeel, categoryName, subcategoryName);
+                    button.onclick = () => handleAnswerClick(question.id, oordeel, categoryName, subcategoryName, tabIndex);
                     answersContainer.appendChild(button);
                 }
             });
@@ -609,11 +628,12 @@
             }
 
             explanationTextarea.oninput = () => {
-                if (selectedAnswers[question.id]) {
-                    selectedAnswers[question.id].explanation = explanationTextarea.value.trim();
-                    updateTextareas();
+                if (!selectedAnswers[question.id]) {
+                    selectedAnswers[question.id] = { oordeel: null, categoryName, subcategoryName, explanation: '', score: 0, tabIndex };
                 }
-                autoResizeTextarea(explanationTextarea); // Auto-resize bij input
+                selectedAnswers[question.id].explanation = explanationTextarea.value.trim();
+                updateTextareas();
+                autoResizeTextarea(explanationTextarea); 
             };
 
             explanationContainer.appendChild(explanationTextarea);
@@ -625,7 +645,7 @@
             return el;
         }
 
-        function handleAnswerClick(questionId, oordeel, categoryName, subcategoryName) {
+        function handleAnswerClick(questionId, oordeel, categoryName, subcategoryName, tabIndex) {
             const questionElement = document.getElementById(questionId);
             const clickedButton = questionElement.querySelector(`button[data-oordeel="${oordeel}"]`);
             const explanationTextarea = document.getElementById(`explanation-${questionId}`);
@@ -639,69 +659,80 @@
                 questionElement.querySelectorAll('.answer-btn').forEach(btn => btn.classList.remove('selected'));
                 clickedButton.classList.add('selected');
                 // De score wordt nu ook opgeslagen
-                selectedAnswers[questionId] = { oordeel, categoryName, subcategoryName, explanation, score: OORDEEL_SCORES[oordeel] };
+                selectedAnswers[questionId] = { oordeel, categoryName, subcategoryName, explanation, score: OORDEEL_SCORES[oordeel], tabIndex };
                 questionElement.classList.add('has-selected-answer'); // Print CSS update
             }
             updateTextareas();
         }
 
         function updateTextareas() {
-            const resultsByCategory = {};
-            const scoresByCategory = {}; // Nieuw object om scores bij te houden
+            // resultsByTabAndCategory[tabIndex][categoryName][subcategoryName] = [resultLines]
+            const resultsByTabAndCategory = {};
+            const scoresByTabAndCategory = {}; 
 
             for (const [questionId, data] of Object.entries(selectedAnswers)) {
-                if (!resultsByCategory[data.categoryName]) {
-                    resultsByCategory[data.categoryName] = {};
-                    scoresByCategory[data.categoryName] = []; // Initialiseer score array
+                const tIdx = data.tabIndex;
+                if (!resultsByTabAndCategory[tIdx]) {
+                    resultsByTabAndCategory[tIdx] = {};
+                    scoresByTabAndCategory[tIdx] = {};
                 }
-                if (!resultsByCategory[data.categoryName][data.subcategoryName]) {
-                    resultsByCategory[data.categoryName][data.subcategoryName] = [];
+                
+                if (!resultsByTabAndCategory[tIdx][data.categoryName]) {
+                    resultsByTabAndCategory[tIdx][data.categoryName] = {};
+                    scoresByTabAndCategory[tIdx][data.categoryName] = []; 
                 }
-                let resultLine = `${questionId}: ${data.oordeel}`;
-                if (data.explanation && data.explanation.length > 0) {
-                    resultLine += ` - ${data.explanation}`;
+                
+                if (!resultsByTabAndCategory[tIdx][data.categoryName][data.subcategoryName]) {
+                    resultsByTabAndCategory[tIdx][data.categoryName][data.subcategoryName] = [];
                 }
-                resultsByCategory[data.categoryName][data.subcategoryName].push(resultLine);
-                scoresByCategory[data.categoryName].push(data.score); // Voeg score toe
+                
+                if (data.oordeel) {
+                    let resultLine = `q-${questionId.split('-').slice(2).join('-')}: ${data.oordeel}`; // Gebruik index deel voor display
+                    if (data.explanation && data.explanation.length > 0) {
+                        resultLine += ` - ${data.explanation}`;
+                    }
+                    resultsByTabAndCategory[tIdx][data.categoryName][data.subcategoryName].push(resultLine);
+                    scoresByTabAndCategory[tIdx][data.categoryName].push(data.score);
+                } else if (data.explanation && data.explanation.length > 0) {
+                    // Enkel toelichting zonder oordeel
+                    let resultLine = `q-${questionId.split('-').slice(2).join('-')}: [Geen oordeel] - ${data.explanation}`;
+                    resultsByTabAndCategory[tIdx][data.categoryName][data.subcategoryName].push(resultLine);
+                }
             }
 
-            // Reset alle textareas
+            // Reset alle textareas en adviezen
             document.querySelectorAll('textarea[id^="textarea-"]').forEach(ta => ta.value = '');
-            
-            // Reset alle advies-indicatoren
             document.querySelectorAll('span[id^="advies-"]').forEach(span => {
                 span.textContent = 'N.v.t.';
                 span.className = 'px-3 py-1 text-sm font-semibold rounded-full bg-slate-100 text-slate-500';
             });
 
-            for (const [categoryName, subcategories] of Object.entries(resultsByCategory)) {
-                const textarea = document.getElementById(`textarea-${toSlug(categoryName)}`);
-                if (textarea) {
-                    let fullText = '';
-                    // ... Sorteer en voeg antwoorden toe aan fullText ...
-                    for (const [subcategoryName, answers] of Object.entries(subcategories)) {
-                        fullText += `${subcategoryName}\n`;
-                        answers.sort().forEach(answer => { // Sort answers by questionId
-                            fullText += `\t${answer}\n`;
-                        });
+            for (const [tIdx, categories] of Object.entries(resultsByTabAndCategory)) {
+                for (const [categoryName, subcategories] of Object.entries(categories)) {
+                    const textarea = document.getElementById(`textarea-${tIdx}-${toSlug(categoryName)}`);
+                    if (textarea) {
+                        let fullText = '';
+                        for (const [subcategoryName, answers] of Object.entries(subcategories)) {
+                            fullText += `${subcategoryName}\n`;
+                            answers.sort().forEach(answer => { 
+                                fullText += `\t${answer}\n`;
+                            });
+                        }
+                        textarea.value = fullText;
+                        autoResizeTextarea(textarea);
                     }
-                    textarea.value = fullText;
-                    autoResizeTextarea(textarea); // Auto-resize na content update
-                }
 
-                // NIEUW: Bereken en update het advies
-                const adviceSpan = document.getElementById(`advies-${toSlug(categoryName)}`);
-                const scores = scoresByCategory[categoryName] || [];
-                
-                if (adviceSpan && scores.length > 0) {
-                    const totalScore = scores.reduce((acc, s) => acc + s, 0);
-                    const averageScore = totalScore / scores.length;
+                    const adviceSpan = document.getElementById(`advies-${tIdx}-${toSlug(categoryName)}`);
+                    const scores = scoresByTabAndCategory[tIdx][categoryName] || [];
                     
-                    const { label, colorClass } = getAdviceFromScore(averageScore);
-                    
-                    adviceSpan.textContent = label;
-                    adviceSpan.className = 'px-3 py-1 text-sm font-semibold rounded-full'; 
-                    adviceSpan.classList.add(...colorClass.split(' '));
+                    if (adviceSpan && scores.length > 0) {
+                        const totalScore = scores.reduce((acc, s) => acc + s, 0);
+                        const averageScore = totalScore / scores.length;
+                        const { label, colorClass } = getAdviceFromScore(averageScore);
+                        adviceSpan.textContent = label;
+                        adviceSpan.className = 'px-3 py-1 text-sm font-semibold rounded-full'; 
+                        adviceSpan.classList.add(...colorClass.split(' '));
+                    }
                 }
             }
             
@@ -727,11 +758,11 @@
             return { label: 'Slecht', colorClass: OORDEEL_COLORS['Slecht'] };
         }
 
-        function copyToClipboard(categoryName) {
-            const textarea = document.getElementById(`textarea-${toSlug(categoryName)}`);
+        function copyToClipboard(categoryName, tabIndex) {
+            const textarea = document.getElementById(`textarea-${tabIndex}-${toSlug(categoryName)}`);
             if (textarea && textarea.value) {
                 navigator.clipboard.writeText(textarea.value).then(() => {
-                    const feedback = document.getElementById(`copy-feedback-${toSlug(categoryName)}`);
+                    const feedback = document.getElementById(`copy-feedback-${tabIndex}-${toSlug(categoryName)}`);
                     feedback.classList.add('show');
                     setTimeout(() => feedback.classList.remove('show'), 2000);
                 }).catch(err => {
@@ -790,6 +821,7 @@
             });
 
             if (interviewData.length > 0) {
+                renderAllTabContents();
                 switchTab(activeTabIndex);
             }
 
