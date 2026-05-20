@@ -193,23 +193,44 @@
         const resetBtnBottom = document.getElementById('reset-btn-bottom');
         const resetBtnBottomContainer = document.getElementById('reset-btn-bottom-container');
 
-        const OORDEEL_LABELS = ['Uitmuntend', 'Goed', 'Voldoende', 'Onvoldoende', 'Slecht'];
-        const OORDEEL_COLORS = {
-            'Uitmuntend': 'bg-green-100 text-green-800 hover:bg-green-200',
-            'Goed': 'bg-blue-100 text-blue-800 hover:bg-blue-200',
-            'Voldoende': 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200',
-            'Onvoldoende': 'bg-orange-100 text-orange-800 hover:bg-orange-200',
-            'Slecht': 'bg-red-100 text-red-800 hover:bg-red-200',
+        const DEFAULT_SCORES = {
+            'uitmuntend': 5,
+            'zeer goed': 5,
+            'goed': 4,
+            'norm': 4,
+            'voldoende': 3,
+            'matig': 3,
+            'onvoldoende': 2,
+            'slecht': 1,
+            'zeer slecht': 1
         };
 
-        // Scores gekoppeld aan de oordelen
-        const OORDEEL_SCORES = {
-            'Uitmuntend': 5,
-            'Goed': 4,
-            'Voldoende': 3,
-            'Onvoldoende': 2,
-            'Slecht': 1,
-        };
+        const COLOR_PALETTE = [
+            'bg-green-100 text-green-800 hover:bg-green-200',   // Score 5
+            'bg-blue-100 text-blue-800 hover:bg-blue-200',     // Score 4
+            'bg-yellow-100 text-yellow-800 hover:bg-yellow-200', // Score 3
+            'bg-orange-100 text-orange-800 hover:bg-orange-200', // Score 2
+            'bg-red-100 text-red-800 hover:bg-red-200'         // Score 1
+        ];
+
+        function getHeaderScore(header, answerHeaders) {
+            if (!header) return 3;
+            const normHeader = header.toString().trim().toLowerCase();
+            if (DEFAULT_SCORES[normHeader] !== undefined) {
+                return DEFAULT_SCORES[normHeader];
+            }
+            const index = answerHeaders.indexOf(header);
+            if (index === -1 || answerHeaders.length <= 1) {
+                return 3;
+            }
+            const score = 5 - (index * 4 / (answerHeaders.length - 1));
+            return Math.max(1, Math.min(5, Math.round(score)));
+        }
+
+        function getHeaderColorClass(score) {
+            const roundedScore = Math.max(1, Math.min(5, Math.round(score)));
+            return COLOR_PALETTE[5 - roundedScore];
+        }
 
         let interviewData = [];
         let selectedAnswers = {};
@@ -251,9 +272,16 @@
 
                     const allTabsData = workbook.SheetNames.map((sheetName, index) => {
                         const worksheet = workbook.Sheets[sheetName];
+                        
+                        // Dynamically detect column headers in the current sheet
+                        const headersRow = XLSX.utils.sheet_to_json(worksheet, { header: 1 })[0] || [];
+                        const answerHeaders = headersRow
+                            .map(h => h ? h.toString().trim() : '')
+                            .filter(h => h !== '' && !['categorie', 'subcategorie', 'vraag'].includes(h.toLowerCase()));
+
                         const jsonData = XLSX.utils.sheet_to_json(worksheet, {defval:""});
-                        const tabData = processExcelData(jsonData, index);
-                        return { name: sheetName, data: tabData };
+                        const tabData = processExcelData(jsonData, index, answerHeaders);
+                        return { name: sheetName, data: tabData, answerHeaders: answerHeaders };
                     });
 
                     interviewData = allTabsData;
@@ -279,7 +307,7 @@
             reader.readAsBinaryString(file);
         }
         
-        function processExcelData(rows, tabIndex) {
+        function processExcelData(rows, tabIndex, answerHeaders) {
             const categories = new Map();
             let currentCategory = '';
             let currentSubCategory = '';
@@ -313,10 +341,10 @@
                 const question = {
                     id: `q-${tabIndex}-${index}`,
                     text: cleanedRow['Vraag'].toString().trim(),
-                    answers: OORDEEL_LABELS.reduce((acc, label) => {
-                        if (cleanedRow[label] && cleanedRow[label].toString().trim()) {
-                            acc[label] = cleanedRow[label].toString().trim();
-                        }
+                    answers: answerHeaders.reduce((acc, label) => {
+                        const exactKey = Object.keys(cleanedRow).find(k => k.toLowerCase() === label.toLowerCase());
+                        const val = exactKey ? cleanedRow[exactKey] : undefined;
+                        acc[label] = val !== undefined && val !== null ? val.toString().trim() : '';
                         return acc;
                     }, {})
                 };
@@ -580,28 +608,38 @@
             questionText.innerHTML = formatText(question.text);
             el.appendChild(questionText);
 
+            const answerHeaders = interviewData[tabIndex]?.answerHeaders || [];
+
             const answersContainer = document.createElement('div');
-            answersContainer.className = 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-2';
+            // Responsive auto-expanding grid for dynamic number of columns
+            answersContainer.className = 'grid grid-cols-1 sm:grid-cols-2 md:grid-flow-col md:auto-cols-fr gap-3';
             
-            OORDEEL_LABELS.forEach(oordeel => {
-                if (question.answers[oordeel]) {
-                    const button = document.createElement('button');
-                    button.dataset.oordeel = oordeel;
-                    
+            answerHeaders.forEach(oordeel => {
+                const answerText = question.answers[oordeel] || '';
+                const button = document.createElement('button');
+                button.dataset.oordeel = oordeel;
+                
+                if (answerText) {
                     button.innerHTML = `
                         <span class="font-semibold block text-sm">${oordeel}</span>
-                        <span class="text-xs mt-1 block font-normal text-slate-600">${formatText(question.answers[oordeel])}</span>
+                        <span class="text-xs mt-1 block font-normal text-slate-600 whitespace-pre-wrap">${formatText(answerText)}</span>
                     `;
-
-                    button.className = `answer-btn p-2 text-left rounded-lg h-full ${OORDEEL_COLORS[oordeel]}`;
-                    
-                    if (selectedAnswers[question.id]?.oordeel === oordeel) {
-                        button.classList.add('selected');
-                    }
-
-                    button.onclick = () => handleAnswerClick(question.id, oordeel, categoryName, subcategoryName, tabIndex);
-                    answersContainer.appendChild(button);
+                } else {
+                    button.innerHTML = `
+                        <span class="font-semibold block text-sm">${oordeel}</span>
+                    `;
                 }
+
+                const score = getHeaderScore(oordeel, answerHeaders);
+                const colorClass = getHeaderColorClass(score);
+                button.className = `answer-btn p-2 text-left rounded-lg h-full ${colorClass}`;
+                
+                if (selectedAnswers[question.id]?.oordeel === oordeel) {
+                    button.classList.add('selected');
+                }
+
+                button.onclick = () => handleAnswerClick(question.id, oordeel, categoryName, subcategoryName, tabIndex, score);
+                answersContainer.appendChild(button);
             });
             el.appendChild(answersContainer);
 
@@ -645,7 +683,7 @@
             return el;
         }
 
-        function handleAnswerClick(questionId, oordeel, categoryName, subcategoryName, tabIndex) {
+        function handleAnswerClick(questionId, oordeel, categoryName, subcategoryName, tabIndex, score) {
             const questionElement = document.getElementById(questionId);
             const clickedButton = questionElement.querySelector(`button[data-oordeel="${oordeel}"]`);
             const explanationTextarea = document.getElementById(`explanation-${questionId}`);
@@ -658,8 +696,7 @@
             } else {
                 questionElement.querySelectorAll('.answer-btn').forEach(btn => btn.classList.remove('selected'));
                 clickedButton.classList.add('selected');
-                // De score wordt nu ook opgeslagen
-                selectedAnswers[questionId] = { oordeel, categoryName, subcategoryName, explanation, score: OORDEEL_SCORES[oordeel], tabIndex };
+                selectedAnswers[questionId] = { oordeel, categoryName, subcategoryName, explanation, score, tabIndex };
                 questionElement.classList.add('has-selected-answer'); // Print CSS update
             }
             updateTextareas();
@@ -728,7 +765,7 @@
                     if (adviceSpan && scores.length > 0) {
                         const totalScore = scores.reduce((acc, s) => acc + s, 0);
                         const averageScore = totalScore / scores.length;
-                        const { label, colorClass } = getAdviceFromScore(averageScore);
+                        const { label, colorClass } = getAdviceFromScore(averageScore, parseInt(tIdx));
                         adviceSpan.textContent = label;
                         adviceSpan.className = 'px-3 py-1 text-sm font-semibold rounded-full'; 
                         adviceSpan.classList.add(...colorClass.split(' '));
@@ -750,12 +787,29 @@
         }
 
         // NIEUWE helper functie
-        function getAdviceFromScore(score) {
-            if (score >= 4.5) return { label: 'Uitmuntend', colorClass: OORDEEL_COLORS['Uitmuntend'] };
-            if (score >= 3.5) return { label: 'Goed', colorClass: OORDEEL_COLORS['Goed'] };
-            if (score >= 2.5) return { label: 'Voldoende', colorClass: OORDEEL_COLORS['Voldoende'] };
-            if (score >= 1.5) return { label: 'Onvoldoende', colorClass: OORDEEL_COLORS['Onvoldoende'] };
-            return { label: 'Slecht', colorClass: OORDEEL_COLORS['Slecht'] };
+        function getAdviceFromScore(averageScore, tabIndex) {
+            const tab = interviewData[tabIndex];
+            if (!tab || !tab.answerHeaders || tab.answerHeaders.length === 0) {
+                return { label: 'N.v.t.', colorClass: 'bg-slate-100 text-slate-500' };
+            }
+
+            const answerHeaders = tab.answerHeaders;
+            let bestHeader = answerHeaders[0];
+            let minDiff = Infinity;
+
+            answerHeaders.forEach(header => {
+                const score = getHeaderScore(header, answerHeaders);
+                const diff = Math.abs(averageScore - score);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    bestHeader = header;
+                }
+            });
+
+            const bestScore = getHeaderScore(bestHeader, answerHeaders);
+            const colorClass = getHeaderColorClass(bestScore);
+
+            return { label: bestHeader, colorClass };
         }
 
         function copyToClipboard(categoryName, tabIndex) {
